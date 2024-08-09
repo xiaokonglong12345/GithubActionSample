@@ -1,7 +1,8 @@
 import os
 import requests
 import json
-from bs4 import BeautifulSoup
+import requests
+from datetime import datetime, timedelta
 
 # 从测试号信息获取
 appID = os.environ.get("APP_ID")
@@ -10,48 +11,44 @@ appSecret = os.environ.get("APP_SECRET")
 openIds = os.environ.get("OPEN_IDS").split(",")  # 将多个OPEN_ID用逗号分隔
 # 天气预报模板ID
 weather_template_id = os.environ.get("TEMPLATE_ID")
+locations = os.environ.get("LOCATIONS").split(";")
+key = os.environ.get("KEY")
+def get_weather(location):
+    url = 'https://devapi.qweather.com/v7/grid-weather/24h'
+    params = {
+        'location': location,
+        'key': key
+    }
 
-def get_weather(my_city):
-    urls = ["http://www.weather.com.cn/textFC/hb.shtml",
-            "http://www.weather.com.cn/textFC/db.shtml",
-            "http://www.weather.com.cn/textFC/hd.shtml",
-            "http://www.weather.com.cn/textFC/hz.shtml",
-            "http://www.weather.com.cn/textFC/hn.shtml",
-            "http://www.weather.com.cn/textFC/xb.shtml",
-            "http://www.weather.com.cn/textFC/xn.shtml"
-            ]
-    for url in urls:
-        resp = requests.get(url)
-        text = resp.content.decode("utf-8")
-        soup = BeautifulSoup(text, 'html5lib')
-        div_conMidtab = soup.find("div", class_="conMidtab")
-        tables = div_conMidtab.find_all("table")
-        for table in tables:
-            trs = table.find_all("tr")[2:]
-            for index, tr in enumerate(trs):
-                tds = tr.find_all("td")
-                city_td = tds[-8]
-                this_city = list(city_td.stripped_strings)[0]
-                if this_city == my_city:
+    response = requests.get(url, params=params).json()['hourly']
+    slow = 0
+    fast = 1
+    weather_data = {}
+    while fast <= 23:
+        if response[slow]['text'] != response[fast]['text']:
+            # 将时间字符串转换为datetime对象
+            time_obj = datetime.strptime(response[slow]['fxTime'][11:16], '%H:%M')
+            # 加上8小时
+            new_time_obj = time_obj + timedelta(hours=8)
+            # 将新的时间转换为字符串，并格式化为24小时制
+            new_time_str = new_time_obj.strftime('%H:%M')
+            weather_data[new_time_str] = response[slow]['text'] + '-' + response[slow]['temp'] + '℃-' + response[slow][
+                'windScale'] + "级-" + response[slow]['humidity'] + '%'
+            slow = fast
+        fast += 1
 
-                    high_temp_td = tds[-5]
-                    low_temp_td = tds[-2]
-                    weather_type_day_td = tds[-7]
-                    weather_type_night_td = tds[-4]
-                    wind_td_day = tds[-6]
-                    wind_td_day_night = tds[-3]
+    # 打印响应结果
+    # 将字典的键值对转换为字符串组成的列表
+    weather_data = [f"{key}: {value}" for key, value in weather_data.items()]
 
-                    high_temp = list(high_temp_td.stripped_strings)[0]
-                    low_temp = list(low_temp_td.stripped_strings)[0]
-                    weather_typ_day = list(weather_type_day_td.stripped_strings)[0]
-                    weather_type_night = list(weather_type_night_td.stripped_strings)[0]
-
-                    wind_day = list(wind_td_day.stripped_strings)[0] + list(wind_td_day.stripped_strings)[1]
-                    wind_night = list(wind_td_day_night.stripped_strings)[0] + list(wind_td_day_night.stripped_strings)[1]
-                    temp = f"{low_temp}——{high_temp}摄氏度" if high_temp != "-" else f"{low_temp}摄氏度"
-                    weather_typ = weather_typ_day if weather_typ_day != "-" else weather_type_night
-                    wind = f"{wind_day}" if wind_day != "--" else f"{wind_night}"
-                    return this_city, temp, weather_typ, wind
+    # 检查列表长度
+    if len(weather_data) > 5:
+        # 如果列表长度超过5，取前五个
+        weather_data = weather_data[:5]
+    elif len(weather_data) < 5:
+        # 如果列表长度不足5，用空字符串填充
+        weather_data.extend([''] * (5 - len(weather_data)))
+    return weather_data
 
 
 def get_access_token():
@@ -85,17 +82,20 @@ def send_weather(access_token, openId, weather):
             "date": {
                 "value": today_str
             },
-            "region": {
-                "value": weather[0]
+            "weather0" : {
+                "value" : weather[0]
             },
-            "weather": {
-                "value": weather[2]
-            },
-            "temp": {
+            "weather1": {
                 "value": weather[1]
             },
-            "wind_dir": {
+            "weather2": {
+                "value": weather[2]
+            },
+            "weather3": {
                 "value": weather[3]
+            },
+            "weather4": {
+                "value": weather[4]
             },
             "today_note": {
                 "value": get_daily_love()
@@ -106,13 +106,13 @@ def send_weather(access_token, openId, weather):
     print(requests.post(url, json.dumps(body)).text)
 
 
-def weather_report(this_city):
+def weather_report(this_city,num):
     access_token = get_access_token()
     weather = get_weather(this_city)
     print(f"天气信息： {weather}")
-    for openId in openIds:
-        send_weather(access_token, openId, weather)
+    send_weather(access_token, openIds[num], weather)
 
 
 if __name__ == '__main__':
-    weather_report("淄博")
+    for i in range(len(locations)):
+        weather_report(locations[i],i)
